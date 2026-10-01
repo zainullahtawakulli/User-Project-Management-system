@@ -3,6 +3,7 @@ import { ref } from 'vue'
 
 import Profile from '@/views/Profile.vue'
 import { useAuthStore } from '@/stores/auth'
+import ActivityLogs from '@/views/logs/ActivityLogs.vue'
 
 /*
 |--------------------------------------------------------------------------
@@ -77,6 +78,9 @@ const routes = [
         path: 'dashboard',
         name: 'dashboard',
         component: () => import('@/views/dashboard/Dashboard.vue'),
+        meta: {
+          title: 'Dashboard',
+        },
       },
 
       /*
@@ -92,6 +96,8 @@ const routes = [
 
         meta: {
           permission: 'users.view',
+          title: 'Users',
+          subtitle: 'Manage accounts, access, and team members.',
         },
       },
 
@@ -102,6 +108,8 @@ const routes = [
 
         meta: {
           permission: 'users.view',
+          title: 'User Details',
+          subtitle: 'Review this account and its workspace access.',
         },
       },
 
@@ -118,6 +126,8 @@ const routes = [
 
         meta: {
           permission: 'projects.view',
+          title: 'Projects',
+          subtitle: 'Plan work, manage project members, and track progress.',
         },
       },
 
@@ -128,6 +138,8 @@ const routes = [
 
         meta: {
           permission: 'projects.view',
+          title: 'Project Details',
+          subtitle: 'Review project progress, members, and related tasks.',
         },
       },
 
@@ -138,6 +150,8 @@ const routes = [
 
         meta: {
           permission: 'projects.update',
+          title: 'Edit Project',
+          subtitle: 'Update project information and its members.',
         },
       },
 
@@ -154,6 +168,8 @@ const routes = [
 
         meta: {
           permission: 'tasks.view',
+          title: 'Tasks',
+          subtitle: 'Track assignments, priorities, and upcoming work.',
         },
       },
 
@@ -164,6 +180,8 @@ const routes = [
 
         meta: {
           permission: 'tasks.view',
+          title: 'Task Details',
+          subtitle: 'Review task ownership, status, and due date.',
         },
       },
 
@@ -174,6 +192,8 @@ const routes = [
 
         meta: {
           permission: 'tasks.update',
+          title: 'Edit Task',
+          subtitle: 'Update task details and assignment.',
         },
       },
 
@@ -183,6 +203,8 @@ const routes = [
         component: () => import('@/views/role/RolesPermissions.vue'),
         meta: {
           permission: 'roles.view',
+          title: 'Roles & Permissions',
+          subtitle: 'Define roles and control which parts of the app they can access.',
         },
       },
 
@@ -196,6 +218,21 @@ const routes = [
         path: 'profile',
         name: 'profile',
         component: Profile,
+        meta: {
+          title: 'My Profile',
+          subtitle: 'Manage your personal details and account security.',
+        },
+      },
+      {
+        path: 'activity-logs',
+        name: 'activity-logs',
+        component: ActivityLogs,
+        meta: {
+          requiresAuth: true,
+          permission: 'activity_logs.view',
+          title: 'Activity Logs',
+          subtitle: 'See recent actions and changes across the workspace.',
+        },
       },
     ],
   },

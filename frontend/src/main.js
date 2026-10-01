@@ -1,6 +1,7 @@
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import PrimeVue from 'primevue/config'
+import ConfirmationService from 'primevue/confirmationservice'
 import Aura from '@primeuix/themes/aura'
 
 import App from './App.vue'
@@ -18,5 +19,6 @@ app.use(PrimeVue, {
     preset: Aura,
   },
 })
+app.use(ConfirmationService)
 
 app.mount('#app')

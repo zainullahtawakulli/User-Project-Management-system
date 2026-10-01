@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Role;
 use App\Models\User;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rule;
@@ -51,7 +52,7 @@ class UserController extends Controller
             ->where('id', '!=', $request->user()->id)
             ->where('status', 'active')
             ->where(function ($query) {
-                $query->whereHas('roleRelation', fn ($roles) => $roles->where('slug', 'user'))
+                $query->whereHas('roleRelation', fn($roles) => $roles->where('slug', 'user'))
                     ->orWhere(function ($query) {
                         $query->whereNull('role_id')->where('role', 'user');
                     });
@@ -166,5 +167,72 @@ class UserController extends Controller
 
         $missingPermissions = array_diff($role->permissions()->pluck('slug')->all(), $actor->permissions());
         abort_if($missingPermissions !== [], 403, 'You cannot assign a role with permissions you do not have.');
+    }
+
+
+    public function forceLogout(Request $request, User $user)
+    {
+        // Kill every active Sanctum token
+        $user->tokens()->delete();
+
+        // Make the account inactive
+        $user->update([
+            'status' => 'inactive',
+        ]);
+
+        activity()
+            ->causedBy($request->user())
+            ->performedOn($user)
+            ->event('force_logout')
+            ->withProperties([
+                'status' => 'inactive',
+            ])
+            ->log('Administrator forced the user to log out');
+
+        return response()->json([
+            'message' => 'User has been logged out and deactivated.',
+            'user' => $user->fresh(),
+        ]);
+    }
+
+
+    public function forceLogin(Request $request, User $user)
+    {
+        abort_unless($request->user()->role === 'super_admin', 403, 'Only a super admin can impersonate users.');
+
+        abort_unless($user->status === 'active', 422, 'Only active accounts can be impersonated.');
+
+        // Keep existing sessions intact and issue a separate, expiring token.
+        $token = $user->createToken(
+            'admin_impersonation',
+            ['impersonation'],
+            Carbon::now()->addMinutes(20)
+        );
+
+        activity()
+            ->causedBy($request->user())
+            ->performedOn($user)
+            ->event('force_login')
+            ->withProperties([
+                'expires_at' => Carbon::now()
+                    ->addMinutes(20)
+                    ->toDateTimeString(),
+            ])
+            ->log('Administrator force logged in as user');
+
+        return response()->json([
+            'message' => 'Force login successful.',
+            'token' => $token->plainTextToken,
+            'token_type' => 'Bearer',
+            'expires_at' => $token->accessToken->expires_at,
+            'user' => [
+                'id' => $user->id,
+                'name' => $user->name,
+                'email' => $user->email,
+                'status' => $user->status,
+                'role' => $user->role,
+                'permissions' => $user->permissions(),
+            ],
+        ]);
     }
 }

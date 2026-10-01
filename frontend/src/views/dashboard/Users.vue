@@ -1,38 +1,49 @@
 <script setup>
-import { computed, ref, onMounted, watch } from 'vue'
-import { ChevronLeft, ChevronRight, Eye, Pencil, Trash2 } from '@lucide/vue'
-import { getUsers, deleteUser } from '@/services/userapi/user'
+import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
+import { Eye, Pencil, Trash2, LogIn, LogOut } from 'lucide-vue-next'
+import Paginator from 'primevue/paginator'
 import { toast } from 'vue-sonner'
+
+import { getUsers, deleteUser } from '@/services/userapi/user'
+import api from '@/services/api'
 
 import CreateUser from '@/views/users/CreateUser.vue'
 import EditUser from '@/views/users/EditUser.vue'
+
 import { useAuthStore } from '@/stores/auth'
+import { useAppConfirm } from '@/composables/useAppConfirm'
 
 const auth = useAuthStore()
+const router = useRouter()
+const confirmAction = useAppConfirm()
+
 const users = ref([])
 const loading = ref(false)
 const error = ref(null)
+
 const showAddUser = ref(false)
 const showEditUser = ref(false)
 const editingUserId = ref(null)
-const currentPage = ref(1)
-const rowsPerPage = 7
 
-const pageCount = computed(() => Math.max(1, Math.ceil(users.value.length / rowsPerPage)))
+const first = ref(0)
+const rowsPerPage = ref(10)
+
+/*
+|--------------------------------------------------------------------------
+| Pagination
+|--------------------------------------------------------------------------
+*/
+
 const paginatedUsers = computed(() => {
-  const start = (currentPage.value - 1) * rowsPerPage
-  return users.value.slice(start, start + rowsPerPage)
-})
-const pageNumbers = computed(() => {
-  const start = Math.max(1, Math.min(currentPage.value - 2, pageCount.value - 6))
-  const end = Math.min(pageCount.value, start + 6)
-
-  return Array.from({ length: end - start + 1 }, (_, index) => start + index)
+  return users.value.slice(first.value, first.value + rowsPerPage.value)
 })
 
-watch(pageCount, (count) => {
-  if (currentPage.value > count) currentPage.value = count
-})
+/*
+|--------------------------------------------------------------------------
+| Fetch Users
+|--------------------------------------------------------------------------
+*/
 
 const fetchUsers = async () => {
   loading.value = true
@@ -41,49 +52,168 @@ const fetchUsers = async () => {
   try {
     const response = await getUsers()
 
-    users.value = response.data.users
+    users.value = response.data?.users || []
+
+    // Reset pagination if current page is no longer valid
+    if (first.value >= users.value.length && users.value.length > 0) {
+      first.value = Math.floor((users.value.length - 1) / rowsPerPage.value) * rowsPerPage.value
+    }
   } catch (err) {
     console.error('Fetch Users error:', err)
 
     error.value = err.response?.data?.message || 'Failed to load users.'
+
+    users.value = []
   } finally {
     loading.value = false
   }
 }
 
-const removeUser = async (user) => {
-  const confirmed = window.confirm(`Are you sure you want to delete ${user.name}?`)
-
-  if (!confirmed) {
-    return
-  }
-
-  try {
-    const response = await deleteUser(user.id)
-    toast.success(response.data.message || `${user.name} deleted successfully.`)
-
-    await fetchUsers()
-  } catch (err) {
-    console.error('Delete User error:', err)
-
-    toast.error(err.response?.data?.message || 'Failed to delete user.')
-  }
-}
+/*
+|--------------------------------------------------------------------------
+| Create User
+|--------------------------------------------------------------------------
+*/
 
 const handleUserCreated = async () => {
   showAddUser.value = false
-
   await fetchUsers()
 }
+
+/*
+|--------------------------------------------------------------------------
+| Edit User
+|--------------------------------------------------------------------------
+*/
 
 const openEditUser = (user) => {
   editingUserId.value = user.id
   showEditUser.value = true
 }
 
-const goToPage = (page) => {
-  currentPage.value = page
+const handleUserUpdated = async () => {
+  showEditUser.value = false
+  editingUserId.value = null
+
+  await fetchUsers()
 }
+
+/*
+|--------------------------------------------------------------------------
+| Delete User
+|--------------------------------------------------------------------------
+*/
+
+const removeUser = (user) => {
+  confirmAction({
+    header: 'Delete user?',
+    message: `Delete ${user.name}? This action cannot be undone.`,
+    acceptLabel: 'Delete user',
+
+    accept: async () => {
+      try {
+        const response = await deleteUser(user.id)
+
+        toast.success(response.data?.message || `${user.name} deleted successfully.`)
+
+        await fetchUsers()
+      } catch (err) {
+        console.error('Delete User error:', err)
+
+        toast.error(err.response?.data?.message || 'Failed to delete user.')
+      }
+    },
+  })
+}
+
+/*
+|--------------------------------------------------------------------------
+| Force Logout
+|--------------------------------------------------------------------------
+*/
+
+const forceLogout = (user) => {
+  confirmAction({
+    header: 'Force logout?',
+    message: `Force ${user.name} to logout from all active sessions?`,
+    acceptLabel: 'Force Logout',
+
+    accept: async () => {
+      try {
+        await api.post(`/users/${user.id}/force-logout`)
+
+        toast.success(`${user.name} has been logged out.`)
+
+        await fetchUsers()
+      } catch (err) {
+        console.error('Force Logout error:', err)
+
+        toast.error(err.response?.data?.message || 'Failed to force logout.')
+      }
+    },
+  })
+}
+
+/*
+|--------------------------------------------------------------------------
+| Force Login
+|--------------------------------------------------------------------------
+|
+| This replaces the current authentication token with the
+| token returned by the backend.
+|
+*/
+
+const forceLogin = async (user) => {
+  try {
+    const adminToken = auth.token
+    const adminUser = auth.user
+    const response = await api.post(`/users/${user.id}/force-login`)
+
+    const data = response.data
+
+    if (!data?.token || !data?.user || !data?.expires_at || !adminToken || !adminUser?.id) {
+      throw new Error('Invalid force-login response from server.')
+    }
+
+    auth.startImpersonation({
+      adminToken,
+      adminUser: { id: adminUser.id, name: adminUser.name },
+      expiresAt: data.expires_at,
+      targetUser: { id: data.user.id, name: data.user.name },
+    })
+    localStorage.setItem('token', data.token)
+    auth.token = data.token
+    await auth.fetchUser()
+
+    toast.success(`You are now signed in as ${data.user.name}.`)
+    await router.replace('/dashboard')
+  } catch (err) {
+    console.error('Force Login error:', err)
+
+    toast.error(err.response?.data?.message || err.message || 'Failed to force login.')
+  }
+}
+
+/*
+|--------------------------------------------------------------------------
+| Format Date
+|--------------------------------------------------------------------------
+*/
+
+const formatDate = (date) => {
+  if (!date) {
+    return '-'
+  }
+
+  return new Date(date).toLocaleDateString()
+}
+
+/*
+|--------------------------------------------------------------------------
+| Mounted
+|--------------------------------------------------------------------------
+*/
 
 onMounted(() => {
   fetchUsers()
@@ -92,7 +222,10 @@ onMounted(() => {
 
 <template>
   <div>
+    <!-- ========================================================= -->
     <!-- Header -->
+    <!-- ========================================================= -->
+
     <div class="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
       <div>
         <h1 class="text-2xl font-bold text-gray-800">Users</h1>
@@ -100,24 +233,33 @@ onMounted(() => {
         <p class="mt-1 text-gray-500">Manage all users</p>
       </div>
 
+      <!-- Create User -->
       <button
-        type="button"
         v-if="auth.hasPermission('users.create')"
+        type="button"
         @click="showAddUser = true"
-        class="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700"
+        class="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
       >
         + Add User
       </button>
     </div>
 
+    <!-- ========================================================= -->
     <!-- Loading -->
+    <!-- ========================================================= -->
+
     <div v-if="loading" class="rounded-xl bg-white p-6 text-center text-gray-500 shadow-sm">
       Loading users...
     </div>
 
+    <!-- ========================================================= -->
     <!-- Error -->
-    <div v-else-if="error" class="rounded-xl bg-white p-6 text-center text-red-500 shadow-sm">
-      <p>{{ error }}</p>
+    <!-- ========================================================= -->
+
+    <div v-else-if="error" class="rounded-xl bg-white p-6 text-center shadow-sm">
+      <p class="text-red-500">
+        {{ error }}
+      </p>
 
       <button
         type="button"
@@ -128,7 +270,10 @@ onMounted(() => {
       </button>
     </div>
 
-    <!-- Table -->
+    <!-- ========================================================= -->
+    <!-- Users Table -->
+    <!-- ========================================================= -->
+
     <div v-else class="overflow-hidden rounded-xl bg-white shadow-sm">
       <div class="overflow-x-auto">
         <table class="w-full text-left">
@@ -157,7 +302,9 @@ onMounted(() => {
               class="border-b last:border-0 hover:bg-gray-50"
             >
               <!-- ID -->
-              <td class="px-6 py-4 font-medium text-gray-700">{{ user.id }}</td>
+              <td class="px-6 py-4 font-medium text-gray-700">
+                {{ user.id }}
+              </td>
 
               <!-- Name -->
               <td class="px-6 py-4 text-gray-700">
@@ -174,9 +321,11 @@ onMounted(() => {
                 <span
                   class="rounded-full px-3 py-1 text-xs font-medium capitalize"
                   :class="
-                    user.role === 'admin'
-                      ? 'bg-blue-100 text-blue-700'
-                      : 'bg-gray-100 text-gray-700'
+                    user.role === 'super_admin'
+                      ? 'bg-purple-100 text-purple-700'
+                      : user.role === 'admin'
+                        ? 'bg-blue-100 text-blue-700'
+                        : 'bg-gray-100 text-gray-700'
                   "
                 >
                   {{ user.role || 'user' }}
@@ -185,14 +334,18 @@ onMounted(() => {
 
               <!-- Created -->
               <td class="px-6 py-4 text-gray-600">
-                {{ user.created_at?.slice(0, 10) }}
+                {{ formatDate(user.created_at) }}
               </td>
 
               <!-- Actions -->
               <td class="px-6 py-4">
-                <div class="flex justify-end gap-1">
+                <div class="flex flex-wrap justify-end gap-1">
+                  <!-- ======================================= -->
                   <!-- Show -->
+                  <!-- ======================================= -->
+
                   <RouterLink
+                    v-if="auth.hasPermission('users.view')"
                     :to="`/user/${user.id}`"
                     :aria-label="`Show ${user.name}`"
                     :title="`Show ${user.name}`"
@@ -201,7 +354,10 @@ onMounted(() => {
                     <Eye :size="16" aria-hidden="true" />
                   </RouterLink>
 
-                  <!-- Update -->
+                  <!-- ======================================= -->
+                  <!-- Edit -->
+                  <!-- ======================================= -->
+
                   <button
                     v-if="auth.hasPermission('users.update')"
                     type="button"
@@ -213,7 +369,10 @@ onMounted(() => {
                     <Pencil :size="16" aria-hidden="true" />
                   </button>
 
+                  <!-- ======================================= -->
                   <!-- Delete -->
+                  <!-- ======================================= -->
+
                   <button
                     v-if="auth.hasPermission('users.delete')"
                     type="button"
@@ -224,11 +383,44 @@ onMounted(() => {
                   >
                     <Trash2 :size="16" aria-hidden="true" />
                   </button>
+
+                  <!-- ======================================= -->
+                  <!-- Force Login -->
+                  <!-- ======================================= -->
+
+                  <button
+                    v-if="auth.isSuperAdmin"
+                    type="button"
+                    @click="forceLogin(user)"
+                    :aria-label="`Force login as ${user.name}`"
+                    :title="`Force login as ${user.name}`"
+                    class="inline-flex h-8 w-8 items-center justify-center rounded text-green-600 transition hover:bg-green-50 hover:text-green-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-500"
+                  >
+                    <LogIn :size="16" aria-hidden="true" />
+                  </button>
+
+                  <!-- ======================================= -->
+                  <!-- Force Logout -->
+                  <!-- ======================================= -->
+
+                  <button
+                    v-if="auth.isSuperAdmin && user.id !== auth.user?.id"
+                    type="button"
+                    @click="forceLogout(user)"
+                    :aria-label="`Force logout ${user.name}`"
+                    :title="`Force logout ${user.name}`"
+                    class="inline-flex h-8 w-8 items-center justify-center rounded text-orange-600 transition hover:bg-orange-50 hover:text-orange-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500"
+                  >
+                    <LogOut :size="16" aria-hidden="true" />
+                  </button>
                 </div>
               </td>
             </tr>
 
+            <!-- ================================================= -->
             <!-- No Users -->
+            <!-- ================================================= -->
+
             <tr v-if="users.length === 0">
               <td colspan="6" class="px-6 py-10 text-center text-gray-500">No users found.</td>
             </tr>
@@ -236,60 +428,39 @@ onMounted(() => {
         </table>
       </div>
 
-      <div v-if="users.length > 0" class="flex justify-center border-t border-gray-100 px-4 py-4">
-        <nav
-          class="flex items-center gap-1 rounded-lg bg-gray-50 p-1"
-          aria-label="Users pagination"
-        >
-          <button
-            type="button"
-            aria-label="Previous page"
-            title="Previous page"
-            :disabled="currentPage === 1"
-            class="inline-flex h-9 w-9 items-center justify-center rounded border border-gray-200 text-gray-600 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
-            @click="goToPage(currentPage - 1)"
-          >
-            <ChevronLeft :size="16" aria-hidden="true" />
-          </button>
+      <!-- ======================================================= -->
+      <!-- Pagination -->
+      <!-- ======================================================= -->
 
-          <button
-            v-for="page in pageNumbers"
-            :key="page"
-            type="button"
-            :aria-label="`Page ${page}`"
-            :aria-current="currentPage === page ? 'page' : undefined"
-            class="h-9 min-w-9 rounded border px-2 text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-            :class="
-              currentPage === page
-                ? 'border-blue-600 bg-blue-600 font-semibold text-white'
-                : 'border-gray-200 text-gray-600 hover:bg-gray-50'
-            "
-            @click="goToPage(page)"
-          >
-            {{ page }}
-          </button>
-
-          <button
-            type="button"
-            aria-label="Next page"
-            title="Next page"
-            :disabled="currentPage === pageCount"
-            class="inline-flex h-9 w-9 items-center justify-center rounded border border-gray-200 text-gray-600 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
-            @click="goToPage(currentPage + 1)"
-          >
-            <ChevronRight :size="16" aria-hidden="true" />
-          </button>
-        </nav>
-      </div>
+      <Paginator
+        v-if="users.length > 0"
+        v-model:first="first"
+        v-model:rows="rowsPerPage"
+        :totalRecords="users.length"
+        :rowsPerPageOptions="[10, 20, 30]"
+        :alwaysShow="false"
+        template="FirstPageLink PrevPageLink PageLinks NextPageLink LastPageLink RowsPerPageDropdown CurrentPageReport"
+        currentPageReportTemplate="Showing {first} to {last} of {totalRecords} users"
+        aria-label="Users pagination"
+        class="border-t border-gray-100"
+      />
     </div>
 
-    <!-- Add User Modal -->
+    <!-- ========================================================= -->
+    <!-- Create User Modal -->
+    <!-- ========================================================= -->
+
     <CreateUser :show="showAddUser" @close="showAddUser = false" @created="handleUserCreated" />
+
+    <!-- ========================================================= -->
+    <!-- Edit User Modal -->
+    <!-- ========================================================= -->
+
     <EditUser
       :show="showEditUser"
       :user-id="editingUserId"
-      @close="showEditUser = false"
-      @updated="fetchUsers"
+      @close="((showEditUser = false), (editingUserId = null))"
+      @updated="handleUserUpdated"
     />
   </div>
 </template>

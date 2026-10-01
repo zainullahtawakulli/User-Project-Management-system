@@ -12,8 +12,12 @@ class TaskController extends Controller
 {
     public function index(Request $request)
     {
+        $validated = $request->validate([
+            'per_page' => ['sometimes', 'integer', 'min:1', 'max:100'],
+        ]);
         $search = $request->input('search');
         $projectId = $request->input('project_id');
+        $perPage = $validated['per_page'] ?? 10;
 
         $query = $this->visibleTasksQuery($request);
         $tasks = $query
@@ -33,7 +37,7 @@ class TaskController extends Controller
                 });
             })
             ->latest()
-            ->paginate(10);
+            ->paginate($perPage);
 
         $statusCounts = $this->visibleTasksQuery($request)
             ->selectRaw('status, COUNT(*) as aggregate')
@@ -283,31 +287,25 @@ class TaskController extends Controller
     private function visibleTasksQuery(Request $request)
     {
         $query = Task::query();
-        if (in_array($request->user()->role, ['super_admin', 'admin'], true)) {
+        if ($request->user()->hasPermission('tasks.create')) {
             return $query;
         }
 
         return $query->where(function ($query) use ($request) {
-            $query->where('created_by', $request->user()->id)
-                ->orWhere('assigned_to', $request->user()->id)
-                ->orWhereHas('assignees', fn ($users) => $users->where('users.id', $request->user()->id))
-                ->orWhereHas('project.users', fn ($users) => $users->where('users.id', $request->user()->id));
+            $query->where('assigned_to', $request->user()->id)
+                ->orWhereHas('assignees', fn ($users) => $users->where('users.id', $request->user()->id));
         });
     }
 
     private function ensureTaskIsVisible(Request $request, Task $task): void
     {
-        if (in_array($request->user()->role, ['super_admin', 'admin'], true)) {
+        if ($request->user()->hasPermission('tasks.create')) {
             return;
         }
 
-        $isProjectMember = $task->project()->whereHas(
-            'users',
-            fn ($users) => $users->where('users.id', $request->user()->id)
-        )->exists();
         $isAssignee = $task->assigned_to === $request->user()->id
             || $task->assignees()->where('users.id', $request->user()->id)->exists();
 
-        abort_unless($isProjectMember || $isAssignee || $task->created_by === $request->user()->id, 404);
+        abort_unless($isAssignee, 404);
     }
 }

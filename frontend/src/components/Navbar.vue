@@ -1,8 +1,9 @@
 <script setup>
-import { onBeforeUnmount, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
-import { searchUsers } from '@/services/userapi/user'
+import { searchWorkspace } from '@/services/searchService'
+import { toast } from 'vue-sonner'
 
 const showMenu = ref(false)
 const searchText = ref('')
@@ -12,7 +13,64 @@ const searchLoading = ref(false)
 const searchError = ref('')
 const auth = useAuthStore()
 const router = useRouter()
+const route = useRoute()
+const currentTime = ref(Date.now())
+const returningToAdmin = ref(false)
 let searchRequestId = 0
+let impersonationTimer = null
+
+const pageTitle = computed(() => route.meta.title || 'Workspace')
+const pageSubtitle = computed(() => {
+  if (route.name === 'dashboard') {
+    const firstName = auth.user?.name?.trim().split(/\s+/)[0]
+    return firstName ? `Welcome back, ${firstName}. Here’s your workspace at a glance.` : 'Welcome back. Here’s your workspace at a glance.'
+  }
+
+  return route.meta.subtitle || 'Manage your workspace and keep everything moving.'
+})
+
+const impersonationSecondsLeft = computed(() => {
+  currentTime.value
+  const expiresAt = Date.parse(auth.impersonation?.expiresAt || '')
+  return Number.isFinite(expiresAt) ? Math.max(0, Math.ceil((expiresAt - currentTime.value) / 1000)) : 0
+})
+
+const impersonationCountdown = computed(() => {
+  const minutes = Math.floor(impersonationSecondsLeft.value / 60)
+  const seconds = impersonationSecondsLeft.value % 60
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+})
+
+const returnToAdmin = async () => {
+  returningToAdmin.value = true
+  try {
+    const admin = await auth.returnToAdmin()
+    toast.success(`Returned to ${admin.name}'s admin session.`)
+    await router.replace('/dashboard')
+  } catch (error) {
+    toast.error(error.response?.data?.message || error.message || 'Could not return to the admin session.')
+  } finally {
+    returningToAdmin.value = false
+  }
+}
+
+const expireImpersonation = () => {
+  if (!auth.isImpersonating || impersonationSecondsLeft.value > 0) return
+
+  auth.clearImpersonation()
+  localStorage.removeItem('token')
+  auth.token = null
+  auth.user = null
+  toast.error('The temporary user session expired. Sign in again to continue.')
+  router.replace('/login')
+}
+
+onMounted(() => {
+  impersonationTimer = setInterval(() => {
+    currentTime.value = Date.now()
+    expireImpersonation()
+  }, 1000)
+})
 
 watch(searchText, (value, _, onCleanup) => {
   const search = value.trim()
@@ -29,9 +87,9 @@ watch(searchText, (value, _, onCleanup) => {
   searchLoading.value = true
   const timeoutId = setTimeout(async () => {
     try {
-      const response = await searchUsers(search)
+      const response = await searchWorkspace(search)
       if (requestId === searchRequestId) {
-        searchResults.value = response.data.users
+        searchResults.value = response.data.results || []
       }
     } catch (error) {
       if (requestId === searchRequestId) {
@@ -47,14 +105,15 @@ watch(searchText, (value, _, onCleanup) => {
   onCleanup(() => clearTimeout(timeoutId))
 })
 
-const openSearchResult = async (user) => {
+const openSearchResult = async (result) => {
   searchText.value = ''
   searchFocused.value = false
-  await router.push(`/user/${user.id}`)
+  await router.push(result.url)
 }
 
 onBeforeUnmount(() => {
   searchRequestId++
+  clearInterval(impersonationTimer)
 })
 
 const initials = () => {
@@ -82,25 +141,49 @@ const logout = async () => {
 
 <template>
   <header
-    class="sticky top-0 z-40 flex h-20 items-center justify-between border-b border-gray-200 bg-white px-6 shadow-sm"
+    class="sticky top-0 z-40 flex min-h-20 flex-wrap items-center justify-between gap-y-2 border-b border-slate-200/80 bg-white/95 px-5 shadow-sm shadow-slate-900/[0.03] backdrop-blur sm:px-8"
   >
     <!-- Left side -->
     <div>
-      <h1 class="text-xl font-semibold text-gray-800">Dashboard</h1>
-
-      <p class="text-sm text-gray-500">Welcome back!</p>
+      <div class="mb-1 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-blue-600">
+        <span class="h-1.5 w-1.5 rounded-full bg-blue-500"></span>
+        Workspace
+      </div>
+      <h1 class="text-xl font-bold tracking-tight text-slate-900 sm:text-2xl">{{ pageTitle }}</h1>
+      <p class="mt-0.5 hidden text-sm text-slate-500 sm:block">{{ pageSubtitle }}</p>
     </div>
 
     <!-- Right side -->
     <div class="flex items-center gap-5">
+      <div
+        v-if="auth.isImpersonating"
+        class="flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2"
+        role="status"
+        aria-live="polite"
+      >
+        <div class="hidden min-w-0 sm:block">
+          <p class="text-[10px] font-semibold uppercase tracking-wide text-amber-700">Viewing as</p>
+          <p class="max-w-32 truncate text-xs font-semibold text-amber-950">{{ auth.user?.name }}</p>
+        </div>
+        <span class="font-mono text-sm font-bold tabular-nums text-amber-900">{{ impersonationCountdown }}</span>
+        <button
+          type="button"
+          :disabled="returningToAdmin"
+          class="whitespace-nowrap rounded-lg bg-amber-700 px-3 py-2 text-xs font-semibold text-white transition hover:bg-amber-800 disabled:opacity-60"
+          @click="returnToAdmin"
+        >
+          {{ returningToAdmin ? 'Returning...' : 'Return to admin' }}
+        </button>
+      </div>
+
       <!-- Search -->
       <div class="hidden md:block">
         <div class="relative">
           <input
             v-model="searchText"
             type="search"
-            placeholder="Search name or email"
-            aria-label="Search users by name or email"
+            placeholder="Search users, projects, tasks..."
+            aria-label="Search workspace"
             autocomplete="off"
             @focus="searchFocused = true"
             @blur="searchFocused = false"
@@ -126,26 +209,29 @@ const logout = async () => {
             v-if="searchFocused && searchText.trim().length >= 2"
             class="absolute left-0 right-0 top-full z-50 mt-2 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg"
             role="listbox"
-            aria-label="User search results"
+            aria-label="Workspace search results"
           >
             <p v-if="searchLoading" class="px-4 py-3 text-sm text-gray-500">Searching...</p>
             <p v-else-if="searchError" class="px-4 py-3 text-sm text-red-600">
               {{ searchError }}
             </p>
             <p v-else-if="searchResults.length === 0" class="px-4 py-3 text-sm text-gray-500">
-              No matching users.
+              No matching results.
             </p>
             <button
-              v-for="user in searchResults"
-              :key="user.id"
+              v-for="result in searchResults"
+              :key="`${result.type}-${result.id}`"
               type="button"
               role="option"
               class="block w-full border-b border-gray-100 px-4 py-3 text-left last:border-0 hover:bg-gray-50"
               @mousedown.prevent
-              @click="openSearchResult(user)"
+              @click="openSearchResult(result)"
             >
-              <span class="block truncate text-sm font-medium text-gray-800">{{ user.name }}</span>
-              <span class="block truncate text-xs text-gray-500">{{ user.email }}</span>
+              <span class="flex items-center justify-between gap-3">
+                <span class="block truncate text-sm font-medium text-gray-800">{{ result.title }}</span>
+                <span class="shrink-0 rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-700">{{ result.type }}</span>
+              </span>
+              <span class="mt-0.5 block truncate text-xs text-gray-500">{{ result.subtitle }}</span>
             </button>
           </div>
         </div>

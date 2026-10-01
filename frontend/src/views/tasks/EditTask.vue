@@ -1,16 +1,21 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import MultiSelect from 'primevue/multiselect'
+import DatePicker from 'primevue/datepicker'
+import FloatLabel from 'primevue/floatlabel'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
 
 import { getTask, updateTask } from '@/services/taskService'
 import { getProject } from '@/services/projectService'
 import { useAuthStore } from '@/stores/auth'
+import { useAppConfirm } from '@/composables/useAppConfirm'
+import { formatDateInput, parseDateInput } from '@/utils/dateInput'
 
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
+const confirmAction = useAppConfirm()
 const canManageTask = computed(() => auth.can('tasks.create'))
 const task = ref(null)
 const project = ref(null)
@@ -24,7 +29,7 @@ const form = ref({
   assignee_ids: [],
   status: 'todo',
   priority: 'medium',
-  due_date: '',
+  due_date: null,
 })
 
 const loadTask = async () => {
@@ -46,7 +51,7 @@ const loadTask = async () => {
         : (task.value.assigned_to ? [task.value.assigned_to] : []),
       status: task.value.status || 'todo',
       priority: task.value.priority || 'medium',
-      due_date: task.value.due_date ? task.value.due_date.slice(0, 10) : '',
+      due_date: parseDateInput(task.value.due_date),
     }
   } catch (err) {
     console.error('Load task for editing error:', err)
@@ -56,7 +61,18 @@ const loadTask = async () => {
   }
 }
 
-const submit = async () => {
+const submit = () => {
+  confirmAction({
+    header: canManageTask.value ? 'Save task changes?' : 'Update task status?',
+    message: canManageTask.value
+      ? 'Your task details and assignees will be updated.'
+      : 'The task status will be updated.',
+    acceptLabel: canManageTask.value ? 'Save changes' : 'Update status',
+    accept: saveTask,
+  })
+}
+
+const saveTask = async () => {
   saving.value = true
   error.value = null
 
@@ -69,7 +85,7 @@ const submit = async () => {
           description: form.value.description || null,
           status: form.value.status,
           priority: form.value.priority,
-          due_date: form.value.due_date || null,
+          due_date: formatDateInput(form.value.due_date),
         }
       : { status: form.value.status }
     const response = await updateTask(task.value.id, payload)
@@ -188,6 +204,9 @@ watch(() => route.params.id, loadTask, { immediate: true })
                 <option value="review">Review</option>
                 <option value="completed">Completed</option>
               </select>
+              <p v-if="!canManageTask" class="mt-2 text-xs leading-5 text-blue-700">
+                This task is shared with its assignees. Changing its status updates it for everyone assigned.
+              </p>
             </div>
 
             <div v-if="canManageTask">
@@ -208,15 +227,18 @@ watch(() => route.params.id, loadTask, { immediate: true })
           </div>
 
           <div v-if="canManageTask">
-            <label for="task-due-date" class="mb-1 block text-sm font-medium text-gray-700"
-              >Due date</label
-            >
-            <input
-              id="task-due-date"
-              v-model="form.due_date"
-              type="date"
-              class="w-full rounded-lg border border-gray-300 px-3 py-2 outline-none focus:border-blue-500"
-            />
+            <FloatLabel variant="on" class="w-full">
+              <DatePicker
+                v-model="form.due_date"
+                inputId="task-due-date"
+                dateFormat="yy-mm-dd"
+                :manualInput="false"
+                showIcon
+                iconDisplay="input"
+                fluid
+              />
+              <label for="task-due-date">Due date</label>
+            </FloatLabel>
           </div>
 
           <div class="flex justify-end gap-3 border-t pt-5">

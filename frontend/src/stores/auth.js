@@ -2,6 +2,14 @@ import { ref, computed } from 'vue'
 import { defineStore } from 'pinia'
 import api from '@/services/api'
 
+const readImpersonationSession = () => {
+  try {
+    return JSON.parse(sessionStorage.getItem('impersonation_session') || 'null')
+  } catch {
+    return null
+  }
+}
+
 export const useAuthStore = defineStore('auth', () => {
   // =========================================================
   // State
@@ -12,6 +20,68 @@ export const useAuthStore = defineStore('auth', () => {
   const loading = ref(false)
   const errors = ref({})
   const initialized = ref(false)
+  const impersonation = ref(readImpersonationSession())
+  const isImpersonating = computed(() => Boolean(
+    user.value?.is_impersonating
+      && impersonation.value?.adminUser?.id
+      && String(user.value.id) !== String(impersonation.value.adminUser.id)
+      && String(user.value.id) === String(impersonation.value.targetUser?.id),
+  ))
+
+  const startImpersonation = (session) => {
+    impersonation.value = session
+    sessionStorage.setItem('impersonation_session', JSON.stringify(session))
+  }
+
+  const clearImpersonation = () => {
+    impersonation.value = null
+    sessionStorage.removeItem('impersonation_session')
+  }
+
+  const returnToAdmin = async () => {
+    const session = impersonation.value
+    if (!session?.adminToken || !session?.adminUser?.id) {
+      throw new Error('The original admin session is unavailable.')
+    }
+
+    const expiresAt = Date.parse(session.expiresAt)
+    if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
+      clearImpersonation()
+      user.value = null
+      token.value = null
+      localStorage.removeItem('token')
+      throw new Error('The impersonation session has expired. Please sign in again.')
+    }
+
+    const impersonationToken = token.value
+    token.value = session.adminToken
+    localStorage.setItem('token', session.adminToken)
+
+    try {
+      const response = await api.get('/user')
+      const restoredUser = response.data.user
+
+      if (String(restoredUser.id) !== String(session.adminUser.id)) {
+        throw new Error('The saved session does not belong to the original admin.')
+      }
+
+      user.value = restoredUser
+      clearImpersonation()
+      return restoredUser
+    } catch (error) {
+      if (error.response?.status === 401) {
+        clearImpersonation()
+        token.value = null
+        user.value = null
+        localStorage.removeItem('token')
+      } else {
+        token.value = impersonationToken
+        localStorage.setItem('token', impersonationToken)
+      }
+
+      throw error
+    }
+  }
 
   // =========================================================
   // Authentication
@@ -120,6 +190,7 @@ export const useAuthStore = defineStore('auth', () => {
     try {
       const response = await api.post('/register', form)
 
+      clearImpersonation()
       user.value = response.data.user
       token.value = response.data.token
 
@@ -148,6 +219,7 @@ export const useAuthStore = defineStore('auth', () => {
     try {
       const response = await api.post('/login', form)
 
+      clearImpersonation()
       user.value = response.data.user
       token.value = response.data.token
 
@@ -179,6 +251,9 @@ export const useAuthStore = defineStore('auth', () => {
       const response = await api.get('/user')
 
       user.value = response.data.user
+      if (!user.value?.is_impersonating && impersonation.value) {
+        clearImpersonation()
+      }
 
       return user.value
     } catch (error) {
@@ -190,6 +265,7 @@ export const useAuthStore = defineStore('auth', () => {
         token.value = null
 
         localStorage.removeItem('token')
+        clearImpersonation()
       }
 
       throw error
@@ -210,6 +286,7 @@ export const useAuthStore = defineStore('auth', () => {
     } catch (error) {
       console.error('Logout error:', error)
     } finally {
+      clearImpersonation()
       user.value = null
       token.value = null
       errors.value = {}
@@ -232,6 +309,8 @@ export const useAuthStore = defineStore('auth', () => {
     loading,
     errors,
     initialized,
+    impersonation,
+    isImpersonating,
 
     // -------------------------------------------------------
     // Authentication
@@ -276,5 +355,8 @@ export const useAuthStore = defineStore('auth', () => {
     login,
     fetchUser,
     logout,
+    startImpersonation,
+    clearImpersonation,
+    returnToAdmin,
   }
 })

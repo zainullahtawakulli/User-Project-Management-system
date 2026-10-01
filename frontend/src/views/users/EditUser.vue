@@ -4,6 +4,7 @@ import { getUser, updateUser } from '@/services/userapi/user'
 import { getRoles } from '@/services/roleService'
 import { useAuthStore } from '@/stores/auth'
 import { toast } from 'vue-sonner'
+import { useAppConfirm } from '@/composables/useAppConfirm'
 
 const props = defineProps({
   show: {
@@ -18,6 +19,7 @@ const props = defineProps({
 
 const emit = defineEmits(['close', 'updated'])
 const auth = useAuthStore()
+const confirmAction = useAppConfirm()
 const roles = ref([])
 const loadingRoles = ref(false)
 
@@ -89,6 +91,15 @@ const closeModal = () => {
 const submit = async () => {
   errors.value = {}
   error.value = null
+  confirmAction({
+    header: 'Save user changes?',
+    message: `Update the account details for ${user.value?.name || 'this user'}?`,
+    acceptLabel: 'Save changes',
+    accept: saveUser,
+  })
+}
+
+const saveUser = async () => {
   saving.value = true
 
   try {
@@ -101,26 +112,19 @@ const submit = async () => {
       data.role_id = Number(form.value.role_id)
     }
 
-    // Only send password if user entered one
     if (form.value.password) {
       data.password = form.value.password
       data.password_confirmation = form.value.password_confirmation
     }
 
     const response = await updateUser(props.userId, data)
-
     user.value = response.data.user
-
     toast.success(response.data.message || 'User updated successfully.')
     emit('updated', response.data.user)
-
-    // Clear password fields
     form.value.password = ''
     form.value.password_confirmation = ''
 
-    setTimeout(() => {
-      closeModal()
-    }, 800)
+    setTimeout(() => closeModal(), 800)
   } catch (err) {
     console.error('Update User error:', err)
 
@@ -137,9 +141,14 @@ const submit = async () => {
 
 watch(
   () => [props.show, props.userId],
-  async ([show]) => {
+  async ([show, userId], [, previousUserId] = []) => {
     if (show) {
-      await Promise.all([fetchUser(), fetchRoles()])
+      const needsUserLoad = !user.value || userId !== previousUserId
+      const needsRolesLoad = auth.can('roles.view') && roles.value.length === 0
+      await Promise.all([
+        needsUserLoad ? fetchUser() : Promise.resolve(),
+        needsRolesLoad ? fetchRoles() : Promise.resolve(),
+      ])
 
       // Older accounts may still have the role stored in the legacy `role`
       // column instead of `role_id`.

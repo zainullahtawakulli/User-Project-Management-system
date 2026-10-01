@@ -1,10 +1,11 @@
 import api from '@/services/api'
 
-export const getProjects = (search = '', page = 1) => {
+export const getProjects = (search = '', page = 1, perPage = 10) => {
   return api.get('/projects', {
     params: {
       search,
       page,
+      per_page: perPage,
     },
   })
 }

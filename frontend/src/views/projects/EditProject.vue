@@ -3,13 +3,18 @@ import { onMounted, ref } from 'vue'
 import { ArrowLeft } from '@lucide/vue'
 import { useRoute, useRouter } from 'vue-router'
 import MultiSelect from 'primevue/multiselect'
+import DatePicker from 'primevue/datepicker'
+import FloatLabel from 'primevue/floatlabel'
 
 import { getProject, updateProject } from '@/services/projectService'
 import { getUserOptions } from '@/services/userapi/user'
 import { toast } from 'vue-sonner'
+import { formatDateInput, parseDateInput } from '@/utils/dateInput'
+import { useAppConfirm } from '@/composables/useAppConfirm'
 
 const route = useRoute()
 const router = useRouter()
+const confirmAction = useAppConfirm()
 
 const loading = ref(true)
 const saving = ref(false)
@@ -23,8 +28,8 @@ const form = ref({
   name: '',
   description: '',
   status: 'active',
-  start_date: '',
-  due_date: '',
+  start_date: null,
+  due_date: null,
   user_ids: [],
 })
 
@@ -57,8 +62,8 @@ const loadProject = async () => {
       name: project.name || '',
       description: project.description || '',
       status: project.status || 'active',
-      start_date: project.start_date ? project.start_date.substring(0, 10) : '',
-      due_date: project.due_date ? project.due_date.substring(0, 10) : '',
+      start_date: parseDateInput(project.start_date),
+      due_date: parseDateInput(project.due_date),
       user_ids: project.users ? project.users.map((user) => user.id) : [],
     }
   } catch (err) {
@@ -70,7 +75,16 @@ const loadProject = async () => {
   }
 }
 
-const submit = async () => {
+const submit = () => {
+  confirmAction({
+    header: 'Save project changes?',
+    message: 'Your project details and member assignments will be updated.',
+    acceptLabel: 'Save changes',
+    accept: saveProject,
+  })
+}
+
+const saveProject = async () => {
   saving.value = true
   error.value = null
 
@@ -79,8 +93,8 @@ const submit = async () => {
       name: form.value.name,
       description: form.value.description || null,
       status: form.value.status,
-      start_date: form.value.start_date || null,
-      due_date: form.value.due_date || null,
+      start_date: formatDateInput(form.value.start_date),
+      due_date: formatDateInput(form.value.due_date),
       user_ids: form.value.user_ids,
     })
 
@@ -194,29 +208,34 @@ onMounted(async () => {
         <!-- Dates -->
         <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div class="space-y-1.5">
-            <label for="edit-project-start" class="block text-sm font-medium text-gray-700">
-              Start date
-            </label>
-
-            <input
-              id="edit-project-start"
-              v-model="form.start_date"
-              type="date"
-              class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-            />
+            <FloatLabel variant="on" class="w-full">
+              <DatePicker
+                v-model="form.start_date"
+                inputId="edit-project-start"
+                dateFormat="yy-mm-dd"
+                :manualInput="false"
+                showIcon
+                iconDisplay="input"
+                fluid
+              />
+              <label for="edit-project-start">Start date</label>
+            </FloatLabel>
           </div>
 
           <div class="space-y-1.5">
-            <label for="edit-project-due" class="block text-sm font-medium text-gray-700">
-              Due date
-            </label>
-
-            <input
-              id="edit-project-due"
-              v-model="form.due_date"
-              type="date"
-              class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-            />
+            <FloatLabel variant="on" class="w-full">
+              <DatePicker
+                v-model="form.due_date"
+                inputId="edit-project-due"
+                dateFormat="yy-mm-dd"
+                :minDate="form.start_date || undefined"
+                :manualInput="false"
+                showIcon
+                iconDisplay="input"
+                fluid
+              />
+              <label for="edit-project-due">Due date</label>
+            </FloatLabel>
           </div>
         </div>
 

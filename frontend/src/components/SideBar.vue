@@ -10,6 +10,7 @@ import {
   ListTodo,
   UserCircle,
   ShieldCheck,
+  History,
   LogOut,
   ChevronRight,
 } from '@lucide/vue'
@@ -47,7 +48,6 @@ const logout = async () => {
     <!-- ===================================================== -->
     <div class="flex h-20 items-center border-b border-slate-800 px-6">
       <RouterLink to="/dashboard" class="flex items-center gap-3">
-        <!-- Logo Icon -->
         <div
           class="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 shadow-lg shadow-blue-600/20"
         >
@@ -178,7 +178,9 @@ const logout = async () => {
         </RouterLink>
       </nav>
 
+      <!-- ===================================================== -->
       <!-- Management -->
+      <!-- ===================================================== -->
       <div class="mb-3 mt-8 px-2">
         <p class="text-[10px] font-semibold uppercase tracking-[0.15em] text-slate-500">
           Management
@@ -210,6 +212,35 @@ const logout = async () => {
 
           <ChevronRight
             v-if="$route.path.startsWith('/roles-permissions')"
+            :size="15"
+            class="text-blue-200"
+          />
+        </RouterLink>
+
+        <!-- Activity Logs -->
+        <RouterLink
+          v-if="auth.can('activity_logs.view')"
+          to="/activity-logs"
+          class="group flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-medium transition-all duration-200"
+          :class="
+            $route.path.startsWith('/activity-logs')
+              ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/20'
+              : 'text-slate-400 hover:bg-slate-900 hover:text-white'
+          "
+        >
+          <History
+            :size="19"
+            :class="
+              $route.path.startsWith('/activity-logs')
+                ? 'text-white'
+                : 'text-slate-500 group-hover:text-slate-300'
+            "
+          />
+
+          <span class="flex-1"> Activity Logs </span>
+
+          <ChevronRight
+            v-if="$route.path.startsWith('/activity-logs')"
             :size="15"
             class="text-blue-200"
           />

@@ -8,14 +8,26 @@ use Symfony\Component\HttpFoundation\Response;
 
 class EnsureUserIsActive
 {
-    public function handle(Request $request, Closure $next): Response
-    {
+    public function handle(
+        Request $request,
+        Closure $next
+    ): Response {
         $user = $request->user();
 
-        if (! $user || $user->status !== 'active') {
+        if (! $user) {
             return response()->json([
-                'message' => 'Your account is not active.',
-            ], 403);
+                'message' => 'Unauthenticated.',
+            ], 401);
+        }
+
+        if ($user->status !== 'active') {
+            $request->user()
+                ->currentAccessToken()
+                ->delete();
+
+            return response()->json([
+                'message' => 'Your account is inactive.',
+            ], 401);
         }
 
         return $next($request);

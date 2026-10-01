@@ -1,9 +1,16 @@
 <script setup>
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { createProject } from '@/services/projectService'
 import { getUsers } from '@/services/userapi/user'
 import { toast } from 'vue-sonner'
 import MultiSelect from 'primevue/multiselect'
+import DatePicker from 'primevue/datepicker'
+import FloatLabel from 'primevue/floatlabel'
+import { formatDateInput } from '@/utils/dateInput'
+
+const props = defineProps({
+  show: { type: Boolean, default: false },
+})
 
 const emit = defineEmits(['close', 'created'])
 
@@ -18,8 +25,8 @@ const form = ref({
   name: '',
   description: '',
   status: 'active',
-  start_date: '',
-  due_date: '',
+  start_date: null,
+  due_date: null,
   user_ids: [],
 })
 
@@ -48,12 +55,13 @@ const submit = async () => {
       name: form.value.name,
       description: form.value.description || null,
       status: form.value.status,
-      start_date: form.value.start_date || null,
-      due_date: form.value.due_date || null,
+      start_date: formatDateInput(form.value.start_date),
+      due_date: formatDateInput(form.value.due_date),
       user_ids: form.value.user_ids,
     })
 
     toast.success(response.data.message || 'Project created successfully.')
+    form.value = { name: '', description: '', status: 'active', start_date: null, due_date: null, user_ids: [] }
     emit('created')
   } catch (err) {
     console.error('Create project error:', err)
@@ -66,12 +74,17 @@ const submit = async () => {
 }
 
 fetchUsers()
+
+watch(() => props.show, (visible) => {
+  if (visible) error.value = null
+})
 </script>
 
 <template>
   <Teleport to="body">
     <div
       class="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/45 p-4 backdrop-blur-sm"
+      v-if="show"
       @click.self="emit('close')"
     >
       <section
@@ -151,26 +164,33 @@ fetchUsers()
 
           <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div class="space-y-1.5">
-              <label for="project-start-date" class="block text-sm font-medium text-gray-700">
-                Start date
-              </label>
-              <input
-                id="project-start-date"
-                v-model="form.start_date"
-                type="date"
-                class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-              />
+              <FloatLabel variant="on" class="w-full">
+                <DatePicker
+                  v-model="form.start_date"
+                  inputId="project-start-date"
+                  dateFormat="yy-mm-dd"
+                  :manualInput="false"
+                  showIcon
+                  iconDisplay="input"
+                  fluid
+                />
+                <label for="project-start-date">Start date</label>
+              </FloatLabel>
             </div>
             <div class="space-y-1.5">
-              <label for="project-due-date" class="block text-sm font-medium text-gray-700">
-                Due date
-              </label>
-              <input
-                id="project-due-date"
-                v-model="form.due_date"
-                type="date"
-                class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-              />
+              <FloatLabel variant="on" class="w-full">
+                <DatePicker
+                  v-model="form.due_date"
+                  inputId="project-due-date"
+                  dateFormat="yy-mm-dd"
+                  :minDate="form.start_date || undefined"
+                  :manualInput="false"
+                  showIcon
+                  iconDisplay="input"
+                  fluid
+                />
+                <label for="project-due-date">Due date</label>
+              </FloatLabel>
             </div>
           </div>
 

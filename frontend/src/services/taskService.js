@@ -1,11 +1,12 @@
 import api from '@/services/api'
 
-export const getTasks = (search = '', page = 1, projectId = null) => {
+export const getTasks = (search = '', page = 1, projectId = null, perPage = 10) => {
   return api.get('/tasks', {
     params: {
       search,
       page,
       project_id: projectId,
+      per_page: perPage,
     },
   })
 }

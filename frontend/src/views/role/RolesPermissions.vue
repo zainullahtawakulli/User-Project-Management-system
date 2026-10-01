@@ -10,8 +10,10 @@ import {
 
 import { toast } from 'vue-sonner'
 import { useAuthStore } from '@/stores/auth'
+import { useAppConfirm } from '@/composables/useAppConfirm'
 
 const auth = useAuthStore()
+const confirmAction = useAppConfirm()
 const roles = ref([])
 const permissions = ref([])
 
@@ -95,7 +97,21 @@ const hasPermission = (permissionId) => {
   return form.value.permission_ids.includes(permissionId)
 }
 
-const saveRole = async () => {
+const saveRole = () => {
+  if (!selectedRole.value) {
+    persistRole()
+    return
+  }
+
+  confirmAction({
+    header: 'Save role changes?',
+    message: `Update the permissions assigned to ${selectedRole.value.name}?`,
+    acceptLabel: 'Save changes',
+    accept: persistRole,
+  })
+}
+
+const persistRole = async () => {
   saving.value = true
 
   try {
@@ -148,21 +164,22 @@ const removeRole = async () => {
     return
   }
 
-  if (!confirm(`Delete "${selectedRole.value.name}"?`)) {
-    return
-  }
-
-  try {
-    await deleteRole(selectedRole.value.id)
-
-    toast.success('Role deleted successfully.')
-
-    selectedRole.value = null
-
-    await loadData()
-  } catch (error) {
-    toast.error(error.response?.data?.message || 'Failed to delete role.')
-  }
+  const role = selectedRole.value
+  confirmAction({
+    header: 'Delete role?',
+    message: `Delete “${role.name}”? Users assigned to this role must be reassigned first.`,
+    acceptLabel: 'Delete role',
+    accept: async () => {
+      try {
+        await deleteRole(role.id)
+        toast.success('Role deleted successfully.')
+        selectedRole.value = null
+        await loadData()
+      } catch (error) {
+        toast.error(error.response?.data?.message || 'Failed to delete role.')
+      }
+    },
+  })
 }
 
 onMounted(loadData)

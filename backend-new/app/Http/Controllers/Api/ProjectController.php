@@ -14,7 +14,11 @@ class ProjectController extends Controller
      */
     public function index(Request $request)
     {
+        $validated = $request->validate([
+            'per_page' => ['sometimes', 'integer', 'min:1', 'max:100'],
+        ]);
         $search = $request->input('search');
+        $perPage = $validated['per_page'] ?? 10;
         $query = Project::query();
         if (! in_array($request->user()->role, ['super_admin', 'admin'], true)) {
             $query->where(function ($query) use ($request) {
@@ -25,14 +29,20 @@ class ProjectController extends Controller
 
         $projects = $query->with([
             'creator:id,name,email',
-        ])->withCount([
-            'users',
-            'tasks',
+        ])->withCount('users')->withCount([
+            'tasks' => function ($tasks) use ($request) {
+                if (! $request->user()->hasPermission('tasks.create')) {
+                    $tasks->where(function ($assigned) use ($request) {
+                        $assigned->where('assigned_to', $request->user()->id)
+                            ->orWhereHas('assignees', fn ($users) => $users->where('users.id', $request->user()->id));
+                    });
+                }
+            },
         ])->when($search, function ($query, $search) {
             $query->where(function ($query) use ($search) {
                 $query->where('name', 'like', "%{$search}%")->orWhere('description', 'like', "%{$search}%");
             });
-        })->latest()->paginate(10);
+        })->latest()->paginate($perPage);
 
         return response()->json($projects);
     }
@@ -92,7 +102,14 @@ class ProjectController extends Controller
         $project->load([
             'creator:id,name,email',
             'users:id,name,email',
-            'tasks',
+            'tasks' => function ($query) use ($request) {
+                if (! $request->user()->hasPermission('tasks.create')) {
+                    $query->where(function ($assigned) use ($request) {
+                        $assigned->where('assigned_to', $request->user()->id)
+                            ->orWhereHas('assignees', fn ($users) => $users->where('users.id', $request->user()->id));
+                    });
+                }
+            },
             'tasks.assignee:id,name,email',
             'tasks.assignees:id,name,email',
             'tasks.creator:id,name,email',

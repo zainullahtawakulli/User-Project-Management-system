@@ -1,10 +1,14 @@
 <script setup>
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import MultiSelect from 'primevue/multiselect'
+import DatePicker from 'primevue/datepicker'
+import FloatLabel from 'primevue/floatlabel'
+import { formatDateInput } from '@/utils/dateInput'
 import { createTask } from '@/services/taskService'
 import { toast } from 'vue-sonner'
 
 const props = defineProps({
+  show: { type: Boolean, default: true },
   project: {
     type: Object,
     required: true,
@@ -23,7 +27,27 @@ const form = ref({
   description: '',
   status: 'todo',
   priority: 'medium',
-  due_date: '',
+  due_date: null,
+})
+
+const resetForm = (projectId = props.project.id) => {
+  form.value = {
+    project_id: projectId,
+    assignee_ids: [],
+    title: '',
+    description: '',
+    status: 'todo',
+    priority: 'medium',
+    due_date: null,
+  }
+}
+
+watch(() => props.project.id, (projectId, previousProjectId) => {
+  if (projectId !== previousProjectId) resetForm(projectId)
+})
+
+watch(() => props.show, (visible) => {
+  if (visible) error.value = null
 })
 
 const submit = async () => {
@@ -38,7 +62,7 @@ const submit = async () => {
       description: form.value.description || null,
       status: form.value.status,
       priority: form.value.priority,
-      due_date: form.value.due_date || null,
+      due_date: formatDateInput(form.value.due_date),
     })
 
     toast.success(response.data.message || 'Task created successfully.')
@@ -56,7 +80,7 @@ const submit = async () => {
 
 <template>
   <Teleport to="body">
-    <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+    <div v-if="show" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
       <div class="w-full max-w-2xl rounded-xl bg-white shadow-xl">
         <!-- Header -->
 
@@ -181,13 +205,18 @@ const submit = async () => {
           <!-- Due date -->
 
           <div>
-            <label class="mb-1 block text-sm font-medium text-gray-700"> Due Date </label>
-
-            <input
-              v-model="form.due_date"
-              type="date"
-              class="w-full rounded-lg border border-gray-300 px-3 py-2 outline-none focus:border-blue-500"
-            />
+            <FloatLabel variant="on" class="w-full">
+              <DatePicker
+                v-model="form.due_date"
+                inputId="create-task-due-date"
+                dateFormat="yy-mm-dd"
+                :manualInput="false"
+                showIcon
+                iconDisplay="input"
+                fluid
+              />
+              <label for="create-task-due-date">Due date</label>
+            </FloatLabel>
           </div>
 
           <!-- Buttons -->

@@ -139,6 +139,11 @@ class RolePermissionSeeder extends Seeder
                 'slug' => 'roles.permissions',
                 'group' => 'Roles',
             ],
+            [
+                'name' => 'Activity Log',
+                'slug' => 'activity_logs.view',
+                'group' => 'Activity'
+            ]
         ];
 
         foreach ($permissions as $permission) {

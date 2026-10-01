@@ -1,11 +1,14 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
-import { ChevronLeft, ChevronRight, Eye, Pencil, Search, Trash2 } from '@lucide/vue'
+import { Eye, Pencil, Search, Trash2 } from '@lucide/vue'
+import Paginator from 'primevue/paginator'
 import { toast } from 'vue-sonner'
 import { deleteTask, getTasks } from '@/services/taskService'
 import { useAuthStore } from '@/stores/auth'
+import { useAppConfirm } from '@/composables/useAppConfirm'
 
 const auth = useAuthStore()
+const confirmAction = useAppConfirm()
 const canDeleteTasks = computed(() => auth.can('tasks.delete'))
 const isScopedUser = computed(() => auth.role === 'user')
 const tasks = ref([])
@@ -13,8 +16,9 @@ const search = ref('')
 const loading = ref(false)
 const error = ref(null)
 const currentPage = ref(1)
-const lastPage = ref(1)
 const totalTasks = ref(0)
+const first = ref(0)
+const rowsPerPage = ref(10)
 const summary = ref({
   total: 0,
   todo: 0,
@@ -33,23 +37,17 @@ const summaryCards = computed(() => [
 
 let searchTimeout
 
-const pageNumbers = computed(() => {
-  const firstPage = Math.max(1, Math.min(currentPage.value - 2, lastPage.value - 4))
-  const finalPage = Math.min(lastPage.value, firstPage + 4)
-
-  return Array.from({ length: finalPage - firstPage + 1 }, (_, index) => firstPage + index)
-})
-
-const fetchTasks = async (page = 1) => {
+const fetchTasks = async (page = 1, perPage = rowsPerPage.value) => {
   loading.value = true
   error.value = null
 
   try {
-    const response = await getTasks(search.value.trim(), page)
+    const response = await getTasks(search.value.trim(), page, null, perPage)
     tasks.value = response.data.data
     currentPage.value = response.data.current_page
-    lastPage.value = response.data.last_page
     totalTasks.value = response.data.total
+    rowsPerPage.value = perPage
+    first.value = (response.data.current_page - 1) * perPage
     summary.value = response.data.summary
   } catch (err) {
     console.error('Fetch tasks error:', err)
@@ -61,30 +59,36 @@ const fetchTasks = async (page = 1) => {
 
 watch(search, () => {
   clearTimeout(searchTimeout)
-  searchTimeout = setTimeout(() => fetchTasks(1), 300)
+  searchTimeout = setTimeout(() => {
+    first.value = 0
+    fetchTasks(1, rowsPerPage.value)
+  }, 300)
 })
 
-const goToPage = (page) => {
-  if (page >= 1 && page <= lastPage.value) {
-    fetchTasks(page)
-  }
+const handlePage = (event) => {
+  rowsPerPage.value = event.rows
+  fetchTasks(event.page + 1, event.rows)
 }
 
 const removeTask = async (task) => {
-  if (!window.confirm(`Delete "${task.title}"?`)) {
-    return
-  }
-
-  try {
-    await deleteTask(task.id)
-    toast.success('Task deleted.')
-    await fetchTasks(
-      tasks.value.length === 1 && currentPage.value > 1 ? currentPage.value - 1 : currentPage.value,
-    )
-  } catch (err) {
-    console.error('Delete task error:', err)
-    toast.error(err.response?.data?.message || 'Failed to delete task.')
-  }
+  confirmAction({
+    header: 'Delete task?',
+    message: `Delete “${task.title}”? This action cannot be undone.`,
+    acceptLabel: 'Delete task',
+    accept: async () => {
+      try {
+        await deleteTask(task.id)
+        toast.success('Task deleted.')
+        await fetchTasks(
+          tasks.value.length === 1 && currentPage.value > 1 ? currentPage.value - 1 : currentPage.value,
+          rowsPerPage.value,
+        )
+      } catch (err) {
+        console.error('Delete task error:', err)
+        toast.error(err.response?.data?.message || 'Failed to delete task.')
+      }
+    },
+  })
 }
 
 const statusLabel = (status) =>
@@ -146,7 +150,7 @@ onMounted(() => {
 
     <div v-if="error" class="rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-700">
       <p>{{ error }}</p>
-      <button type="button" class="mt-2 font-medium underline" @click="fetchTasks(currentPage)">
+      <button type="button" class="mt-2 font-medium underline" @click="fetchTasks(currentPage, rowsPerPage)">
         Retry
       </button>
     </div>
@@ -237,48 +241,19 @@ onMounted(() => {
         </table>
       </div>
 
-      <footer
-        v-if="!loading && lastPage > 1"
-        class="flex items-center justify-between border-t border-gray-100 px-4 py-3"
-      >
-        <p class="text-sm text-gray-500">{{ totalTasks }} tasks</p>
-        <nav class="flex items-center gap-1" aria-label="Task pagination">
-          <button
-            type="button"
-            aria-label="Previous page"
-            :disabled="currentPage === 1"
-            class="inline-flex h-8 w-8 items-center justify-center rounded border border-gray-200 text-gray-600 disabled:opacity-40"
-            @click="goToPage(currentPage - 1)"
-          >
-            <ChevronLeft :size="16" aria-hidden="true" />
-          </button>
-          <button
-            v-for="page in pageNumbers"
-            :key="page"
-            type="button"
-            :aria-current="currentPage === page ? 'page' : undefined"
-            :aria-label="`Page ${page}`"
-            class="h-8 min-w-8 rounded border px-2 text-sm"
-            :class="
-              currentPage === page
-                ? 'border-blue-600 bg-blue-600 text-white'
-                : 'border-gray-200 text-gray-600'
-            "
-            @click="goToPage(page)"
-          >
-            {{ page }}
-          </button>
-          <button
-            type="button"
-            aria-label="Next page"
-            :disabled="currentPage === lastPage"
-            class="inline-flex h-8 w-8 items-center justify-center rounded border border-gray-200 text-gray-600 disabled:opacity-40"
-            @click="goToPage(currentPage + 1)"
-          >
-            <ChevronRight :size="16" aria-hidden="true" />
-          </button>
-        </nav>
-      </footer>
+      <Paginator
+        v-if="!loading && totalTasks > 0"
+        v-model:first="first"
+        v-model:rows="rowsPerPage"
+        :totalRecords="totalTasks"
+        :rowsPerPageOptions="[10, 20, 30]"
+        :alwaysShow="false"
+        template="FirstPageLink PrevPageLink PageLinks NextPageLink LastPageLink RowsPerPageDropdown CurrentPageReport"
+        currentPageReportTemplate="Showing {first} to {last} of {totalRecords} tasks"
+        aria-label="Task pagination"
+        class="border-t border-gray-100"
+        @page="handlePage"
+      />
     </div>
   </section>
 </template>

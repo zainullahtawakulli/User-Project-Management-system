@@ -2,8 +2,6 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import {
-  ChevronLeft,
-  ChevronRight,
   Ban,
   Eye,
   FolderPlus,
@@ -13,13 +11,16 @@ import {
   Search,
   Trash2,
 } from '@lucide/vue'
+import Paginator from 'primevue/paginator'
 import { getProject, getProjects, deleteProject, updateProject } from '@/services/projectService'
 import CreateProject from './CreateProject.vue'
 import CreateTask from '@/views/tasks/CreateTask.vue'
 import { toast } from 'vue-sonner'
 import { useAuthStore } from '@/stores/auth'
+import { useAppConfirm } from '@/composables/useAppConfirm'
 
 const auth = useAuthStore()
+const confirmAction = useAppConfirm()
 const canCreateProjects = computed(() => auth.can('projects.create'))
 const canUpdateProjects = computed(() => auth.can('projects.update'))
 const canDeleteProjects = computed(() => auth.can('projects.delete'))
@@ -32,8 +33,9 @@ const error = ref(null)
 const search = ref('')
 
 const currentPage = ref(1)
-const lastPage = ref(1)
 const totalProjects = ref(0)
+const first = ref(0)
+const rowsPerPage = ref(10)
 
 const showCreateModal = ref(false)
 const showCreateTask = ref(false)
@@ -43,17 +45,18 @@ const updatingProjectId = ref(null)
 
 let searchTimeout = null
 
-const fetchProjects = async (page = 1) => {
+const fetchProjects = async (page = 1, perPage = rowsPerPage.value) => {
   loading.value = true
   error.value = null
 
   try {
-    const response = await getProjects(search.value, page)
+    const response = await getProjects(search.value, page, perPage)
 
     projects.value = response.data.data
     currentPage.value = response.data.current_page
-    lastPage.value = response.data.last_page
     totalProjects.value = response.data.total
+    rowsPerPage.value = perPage
+    first.value = (response.data.current_page - 1) * perPage
   } catch (err) {
     console.error('Fetch projects error:', err)
 
@@ -67,30 +70,16 @@ const searchProjects = () => {
   clearTimeout(searchTimeout)
 
   searchTimeout = setTimeout(() => {
-    fetchProjects(1)
+    first.value = 0
+    fetchProjects(1, rowsPerPage.value)
   }, 300)
 }
 
 watch(search, searchProjects)
 
-const goToPage = (page) => {
-  if (page < 1 || page > lastPage.value) {
-    return
-  }
-
-  fetchProjects(page)
-}
-
-const previousPage = () => {
-  if (currentPage.value > 1) {
-    fetchProjects(currentPage.value - 1)
-  }
-}
-
-const nextPage = () => {
-  if (currentPage.value < lastPage.value) {
-    fetchProjects(currentPage.value + 1)
-  }
+const handlePage = (event) => {
+  rowsPerPage.value = event.rows
+  fetchProjects(event.page + 1, event.rows)
 }
 
 const handleProjectCreated = () => {
@@ -146,22 +135,22 @@ const changeProjectStatus = async (project, status) => {
 }
 
 const removeProject = async (project) => {
-  const confirmed = window.confirm(`Are you sure you want to delete "${project.name}"?`)
+  confirmAction({
+    header: 'Delete project?',
+    message: `Delete “${project.name}”? This action cannot be undone.`,
+    acceptLabel: 'Delete project',
+    accept: async () => {
+      try {
+        const response = await deleteProject(project.id)
+        toast.success(response.data.message || 'Project deleted successfully.')
 
-  if (!confirmed) {
-    return
-  }
-
-  try {
-    const response = await deleteProject(project.id)
-    toast.success(response.data.message || 'Project deleted successfully.')
-
-    await fetchProjects(currentPage.value)
-  } catch (err) {
-    console.error('Delete project error:', err)
-
-    toast.error(err.response?.data?.message || 'Failed to delete project.')
-  }
+        await fetchProjects(currentPage.value)
+      } catch (err) {
+        console.error('Delete project error:', err)
+        toast.error(err.response?.data?.message || 'Failed to delete project.')
+      }
+    },
+  })
 }
 
 const getStatusLabel = (status) => {
@@ -500,56 +489,29 @@ onMounted(() => {
     </div>
 
     <!-- Pagination -->
-    <nav v-if="lastPage > 1" class="flex justify-center" aria-label="Project pagination">
-      <div class="flex items-center gap-1 rounded-lg bg-gray-50 p-1">
-        <button
-          type="button"
-          aria-label="Previous page"
-          :disabled="currentPage === 1"
-          class="inline-flex h-9 w-9 items-center justify-center rounded border border-gray-200 text-gray-600 hover:bg-white disabled:cursor-not-allowed disabled:opacity-40"
-          @click="previousPage"
-        >
-          <ChevronLeft :size="16" aria-hidden="true" />
-        </button>
-
-        <button
-          v-for="page in lastPage"
-          :key="page"
-          type="button"
-          :aria-label="`Page ${page}`"
-          :aria-current="currentPage === page ? 'page' : undefined"
-          class="h-9 min-w-9 rounded border px-2 text-sm"
-          :class="
-            currentPage === page
-              ? 'border-blue-600 bg-blue-600 text-white'
-              : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
-          "
-          @click="goToPage(page)"
-        >
-          {{ page }}
-        </button>
-
-        <button
-          type="button"
-          aria-label="Next page"
-          :disabled="currentPage === lastPage"
-          class="inline-flex h-9 w-9 items-center justify-center rounded border border-gray-200 text-gray-600 hover:bg-white disabled:cursor-not-allowed disabled:opacity-40"
-          @click="nextPage"
-        >
-          <ChevronRight :size="16" aria-hidden="true" />
-        </button>
-      </div>
-    </nav>
+    <Paginator
+      v-model:first="first"
+      v-model:rows="rowsPerPage"
+      :totalRecords="totalProjects"
+      :rowsPerPageOptions="[10, 20, 30]"
+      :alwaysShow="false"
+      template="FirstPageLink PrevPageLink PageLinks NextPageLink LastPageLink RowsPerPageDropdown CurrentPageReport"
+      currentPageReportTemplate="Showing {first} to {last} of {totalRecords} projects"
+      aria-label="Project pagination"
+      class="rounded-lg border border-gray-200 bg-white"
+      @page="handlePage"
+    />
 
     <!-- Create Modal -->
     <CreateProject
-      v-if="showCreateModal"
+      :show="showCreateModal"
       @close="showCreateModal = false"
       @created="handleProjectCreated"
     />
     <CreateTask
-      v-if="showCreateTask && selectedProject"
+      v-if="selectedProject"
       :project="selectedProject"
+      :show="showCreateTask"
       @close="showCreateTask = false"
       @created="handleTaskCreated"
     />

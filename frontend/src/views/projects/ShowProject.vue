@@ -9,10 +9,12 @@ import CreateTask from '@/views/tasks/CreateTask.vue'
 import { deleteTask } from '@/services/taskService'
 import { toast } from 'vue-sonner'
 import { useAuthStore } from '@/stores/auth'
+import { useAppConfirm } from '@/composables/useAppConfirm'
 
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
+const confirmAction = useAppConfirm()
 const canUpdateProjects = computed(() => auth.can('projects.update'))
 const canCreateTasks = computed(() => auth.can('tasks.create'))
 const canDeleteTasks = computed(() => auth.can('tasks.delete'))
@@ -47,22 +49,21 @@ const handleTaskCreated = async () => {
 }
 
 const removeTask = async (task) => {
-  const confirmed = window.confirm(`Are you sure you want to delete "${task.title}"?`)
-
-  if (!confirmed) {
-    return
-  }
-
-  try {
-    const response = await deleteTask(task.id)
-    toast.success(response.data.message || 'Task deleted successfully.')
-
-    await fetchProject()
-  } catch (err) {
-    console.error('Delete task error:', err)
-
-    toast.error(err.response?.data?.message || 'Failed to delete task.')
-  }
+  confirmAction({
+    header: 'Delete task?',
+    message: `Delete “${task.title}”? This action cannot be undone.`,
+    acceptLabel: 'Delete task',
+    accept: async () => {
+      try {
+        const response = await deleteTask(task.id)
+        toast.success(response.data.message || 'Task deleted successfully.')
+        await fetchProject()
+      } catch (err) {
+        console.error('Delete task error:', err)
+        toast.error(err.response?.data?.message || 'Failed to delete task.')
+      }
+    },
+  })
 }
 
 const getStatusLabel = (status) => {

@@ -47,7 +47,6 @@ const closeModal = () => {
     return
   }
 
-  resetForm()
   emit('close')
 }
 
@@ -67,9 +66,9 @@ const submit = async () => {
     toast.success(response.data.message || 'User created successfully.')
 
     emit('created', response.data.user)
+    resetForm()
 
     setTimeout(() => {
-      resetForm()
       emit('close')
     }, 700)
   } catch (error) {
@@ -90,18 +89,20 @@ watch(
   () => props.show,
   async (value) => {
     if (value) {
-      resetForm()
-      if (auth.can('roles.view')) {
+      errors.value = {}
+      if (auth.can('roles.view') && roles.value.length === 0) {
         loadingRoles.value = true
         try {
           const response = await getRoles()
           roles.value = response.data.roles
-          form.value.role_id = roles.value.find((role) => role.slug === 'user')?.id || ''
         } catch (error) {
           toast.error(error.response?.data?.message || 'Failed to load roles.')
         } finally {
           loadingRoles.value = false
         }
+      }
+      if (auth.can('roles.view') && !form.value.role_id) {
+        form.value.role_id = roles.value.find((role) => role.slug === 'user')?.id || ''
       }
     }
   },

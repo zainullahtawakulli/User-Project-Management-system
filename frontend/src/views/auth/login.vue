@@ -4,7 +4,7 @@ defineOptions({ name: 'LoginView' })
 import { ref } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { useRouter } from 'vue-router'
-
+import Password from 'primevue/password'
 const auth = useAuthStore()
 
 const router = useRouter()
@@ -93,19 +93,22 @@ const login = async () => {
 
         <!-- Password -->
         <div>
-          <div class="flex items-center justify-between mb-1">
-            <label class="block text-sm font-medium text-gray-700"> Password </label>
+          <label for="password" class="block text-sm font-medium text-gray-700 mb-1">
+            Password
+          </label>
 
-            <a href="#" class="text-sm text-blue-600 hover:text-blue-700"> Forgot password? </a>
-          </div>
-
-          <input
+          <Password
+            id="password"
             v-model="form.password"
-            type="password"
+            inputId="password"
             placeholder="Enter your password"
-            class="w-full px-4 py-3 border rounded-lg outline-none transition focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            autocomplete="new-password"
+            toggleMask
+            :feedback="false"
+            promptLabel="Enter a password"
+            fluid
             :class="{
-              'border-red-500': errors.password,
+              'p-invalid': errors.password,
             }"
           />
 

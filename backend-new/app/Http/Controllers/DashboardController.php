@@ -19,12 +19,13 @@ class DashboardController extends Controller
                     ->orWhereHas('users', fn ($users) => $users->where('users.id', $user->id));
             });
 
-            $taskQuery = Task::query()->where(function ($query) use ($user) {
-                $query->where('created_by', $user->id)
-                    ->orWhere('assigned_to', $user->id)
-                    ->orWhereHas('assignees', fn ($users) => $users->where('users.id', $user->id))
-                    ->orWhereHas('project.users', fn ($users) => $users->where('users.id', $user->id));
-            });
+            $taskQuery = Task::query();
+            if (! $user->hasPermission('tasks.create')) {
+                $taskQuery->where(function ($query) use ($user) {
+                    $query->where('assigned_to', $user->id)
+                        ->orWhereHas('assignees', fn ($users) => $users->where('users.id', $user->id));
+                });
+            }
 
             return response()->json([
                 'role' => $user->role,

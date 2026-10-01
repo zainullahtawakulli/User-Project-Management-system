@@ -9,8 +9,10 @@ import { deleteUser } from '@/services/userapi/user'
 import { useAuthStore } from '@/stores/auth'
 import CreateUser from '@/views/users/CreateUser.vue'
 import EditUser from '@/views/users/EditUser.vue'
+import { useAppConfirm } from '@/composables/useAppConfirm'
 
 const auth = useAuthStore()
+const confirmAction = useAppConfirm()
 const users = ref([])
 const dashboardRole = ref(null)
 const stats = ref({
@@ -59,16 +61,21 @@ const fetchDashboard = async () => {
 }
 
 const removeUser = async (user) => {
-  if (!window.confirm(`Are you sure you want to delete ${user.name}?`)) return
-
-  try {
-    const response = await deleteUser(user.id)
-    toast.success(response.data.message || `${user.name} deleted successfully.`)
-    await fetchDashboard()
-  } catch (err) {
-    console.error('Delete user error:', err)
-    toast.error(err.response?.data?.message || 'Failed to delete user.')
-  }
+  confirmAction({
+    header: 'Delete user?',
+    message: `Delete ${user.name}? This action cannot be undone.`,
+    acceptLabel: 'Delete user',
+    accept: async () => {
+      try {
+        const response = await deleteUser(user.id)
+        toast.success(response.data.message || `${user.name} deleted successfully.`)
+        await fetchDashboard()
+      } catch (err) {
+        console.error('Delete user error:', err)
+        toast.error(err.response?.data?.message || 'Failed to delete user.')
+      }
+    },
+  })
 }
 
 const openEditUser = (user) => {
